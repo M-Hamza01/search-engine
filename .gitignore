@@ -1,0 +1,6 @@
+index_data/
+data/arxiv_subset_75k.jsonl
+arxiv-metadata-oversnapshot.json
+__pycache__/
+*.pyc
+*.tmp
