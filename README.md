@@ -1,88 +1,207 @@
-# CS-250 DSA Project – Stage 2: Lexicon, Forward Index, Inverted Index
+# Search Engine — Stage 2 Indexing System
 
-Team SE16-B: Muhammad Hamza (553436), Muhammad Rayyan Bilal (545830), Muhammad Asfand Khan (554959)
-Dataset: Cornell University arXiv metadata (CC0 1.0), 75,000-paper subset. Python 3.9+, **standard library only**.
+This repository contains the Stage 2 implementation of the CS-250 Data Structures and Algorithms project. It transforms arXiv metadata into the three core structures required by the search engine:
 
-## Run it
+- a lexicon that assigns a stable integer ID to every term;
+- a forward index that records the terms present in each document; and
+- an inverted index that provides efficient term-to-document lookup.
+
+The implementation uses Python's standard library only. Indexes are stored as plain JSONL and binary-offset files; no database or external indexing framework is used.
+
+## Team
+
+| Member | Student ID | Primary responsibility |
+|---|---:|---|
+| Muhammad Hamza | 553436 | Build pipeline, configuration, dataset preparation, and documentation |
+| Muhammad Rayyan Bilal | 545830 | Tokenization, corpus processing, lexicon, and forward index |
+| Muhammad Asfand Khan | 554959 | Inverted index, lookup utilities, and validation tests |
+
+Section: SE16-B
+
+Course: CS-250 Data Structures and Algorithms
+
+## Stage 2 deliverables
+
+The project currently provides:
+
+- deterministic tokenization and normalization;
+- dense, stable word IDs in order of first occurrence;
+- per-field term frequencies for title, authors, abstract, and categories;
+- the first position of each term in the abstract;
+- streamed forward-index construction;
+- memory-bounded inverted-index construction using external sort-merge;
+- random access to documents and posting lists through binary offset tables;
+- handling and reporting of malformed, invalid, and duplicate records;
+- command-line utilities for building and inspecting an index; and
+- 22 automated tests covering individual components and end-to-end consistency.
+
+## Repository structure
+
+```text
+data/
+  sample_arxiv.jsonl       Reproducible 402-document test corpus
+indexer/
+  build_index.py           Index construction command-line entry point
+  config.py                File names and indexing defaults
+  corpus.py                Corpus validation and random-access document store
+  forward_index.py         Document analysis and forward-index writer
+  inverted_index.py        External sort-merge and posting-list reader
+  lexicon.py               Term-to-ID and ID-to-term mappings
+  lookup.py                Index inspection command-line utility
+  tokenizer.py             Text and category tokenization
+tests/
+  test_indexing.py         Unit and integration tests
+tools/
+  make_sample_data.py      Deterministic sample-corpus generator
+  make_subset.py           Evenly sampled 75,000-document corpus generator
+```
+
+## Requirements
+
+- Python 3.9 or later
+- No third-party Python packages
+
+Commands below should be run from the repository root. On systems where `python` is not the Python 3 command, use `python3` or the appropriate Python launcher.
+
+## Quick reproducible demonstration
+
+The repository includes `data/sample_arxiv.jsonl`, containing two real arXiv records and 400 deterministically generated records. It allows the complete pipeline and test suite to run without downloading the full dataset.
+
+Build a sample index:
 
 ```bash
-# 0. (once) cut the 75k subset out of the Kaggle file – evenly spread over all years
-python tools/make_subset.py --input arxiv-metadata-oversnapshot.json --output data/arxiv_subset_75k.jsonl --count 75000
+python -m indexer.build_index --input data/sample_arxiv.jsonl --out index_data_sample
+```
 
-# 1. build lexicon + forward index + inverted index
-python -m indexer.build_index --input data/arxiv_subset_75k.jsonl --out index_data
+Inspect a posting list and perform an AND query:
 
-# quick demo on the bundled test data (402 records, <1 second)
-python -m indexer.build_index --input data/sample_arxiv.jsonl --out index_data
+```bash
+python -m indexer.lookup --index-dir index_data_sample --word coisotropic
+python -m indexer.lookup --index-dir index_data_sample --and voting election preference
+```
 
-# 2. inspect the result
-python -m indexer.lookup --index-dir index_data --word coisotropic
-python -m indexer.lookup --index-dir index_data --and voting election preference
+Run the complete automated test suite:
 
-# 3. tests
+```bash
 python -m unittest discover -s tests -v
 ```
 
-## What is produced (`index_data/`, no database – plain files)
+Expected result:
 
-| File | Contents |
+```text
+Ran 22 tests
+OK
+```
+
+## Full 75,000-document build
+
+The evaluation corpus is derived from the [Cornell University arXiv metadata dataset](https://www.kaggle.com/datasets/Cornell-University/arxiv), distributed under CC0 1.0. The original dataset and generated 75,000-record subset are excluded from Git because of their size.
+
+After downloading `arxiv-metadata-oai-snapshot.json`, create a subset evenly distributed across the source file:
+
+```bash
+python tools/make_subset.py --input arxiv-metadata-oai-snapshot.json --output data/arxiv_subset_75k.jsonl --count 75000
+```
+
+Build the complete Stage 2 index:
+
+```bash
+python -m indexer.build_index --input data/arxiv_subset_75k.jsonl --out index_data
+```
+
+The `--limit` option can restrict a build to the first N valid documents, while `--batch-docs` controls the number of documents inverted in each in-memory batch.
+
+## Index representation
+
+The build produces the following files:
+
+| File | Purpose |
 |---|---|
-| `lexicon.json` | `{"word": word_id}`; ids are dense 0..N-1 in order of first appearance |
-| `forward_index.jsonl` | one line per doc: `{"d": doc_id, "n": length, "w": [[word_id, tf_title, tf_authors, tf_abstract, tf_categories, first_abstract_pos], ...]}` |
-| `inverted_index.jsonl` | one line per word, sorted by word id: `{"w": word_id, "df": n, "p": [[doc_id, tf_title, tf_authors, tf_abstract, tf_categories, first_abstract_pos], ...]}`, postings sorted by doc id |
-| `inverted.offsets.bin` | uint64 byte offset of each word's line → one seek reads one word's postings (the hook for barrels in Stage 3) |
-| `docs.jsonl` + `docs.offsets.bin` | document table (title, authors, categories, date, abstract) with random access by doc id |
-| `build_stats.json` | counts, timings, peak memory, median abstract length |
+| `lexicon.json` | Maps each normalized term to a dense word ID |
+| `forward_index.jsonl` | Stores the word IDs and field statistics for every document |
+| `inverted_index.jsonl` | Stores a sorted posting list for every word ID |
+| `inverted.offsets.bin` | Stores a 64-bit byte offset for each posting list |
+| `docs.jsonl` | Stores searchable document metadata and text |
+| `docs.offsets.bin` | Stores a 64-bit byte offset for each document |
+| `build_stats.json` | Records corpus counts, skipped records, timings, and output sizes |
 
-The per-field counts and `first_abstract_pos` are stored now because Stage 4 ranking needs them
-(title/author hits weigh more than abstract hits; earlier mention is better; `date_ord` in `docs.jsonl` gives the recency boost).
+Each forward-index entry has the form:
 
-## Design and why (viva notes)
+```text
+[word_id, tf_title, tf_authors, tf_abstract, tf_categories, first_abstract_position]
+```
 
-* **Tokenizer** (`tokenizer.py`): lower-case, accent folding, tokens = runs of `[a-z0-9]`, drop 1-char and >40-char tokens.
-  Stop words are *kept* because the spec requires "Data structures **and** Algorithms" to match all four words.
-  No stemming, so lexicon words also exist in the pre-trained embeddings used for semantic search later.
-  The same function must be used for queries.
-* **Lexicon**: hash map `word → id` plus array `id → word`, both O(1). New words (dynamic addition) get the next id; old ids never change.
-* **Forward index**: built in the same pass as the lexicon (`analyze_document`), streamed to disk one document at a time.
-  `analyze_document` is reused later for documents uploaded at runtime.
-* **Inverted index**: built from the forward index by an **external sort-merge (SPIMI)**:
-  1. invert batches of 5,000 documents in RAM and write each as a sorted "run";
-  2. k-way merge the runs with `heapq.merge` (a min-heap). Docs are read in id order, and the merge is stable, so each word's postings stay sorted by doc id.
+Each inverted posting adds the document ID at the beginning:
 
-  RAM depends on the batch size, not on corpus size. Complexity: O(P log R) for P postings and R runs.
-* **Offsets file**: word id → byte offset gives O(1) random access to a posting list – no scanning, no loading the whole index.
-* **No database**: only files, as the spec demands. Files with offsets are written in binary so offsets are exact on Windows too.
-* **Robustness**: malformed JSON lines, records with no id/text and duplicate ids are skipped and counted in `build_stats.json`.
+```text
+[doc_id, tf_title, tf_authors, tf_abstract, tf_categories, first_abstract_position]
+```
+
+These statistics support later ranking requirements, including field weighting, early-term-position weighting, and recency scoring.
+
+## Algorithms and data structures
+
+### Tokenization
+
+General text is converted to lowercase, Unicode accents are folded, and tokens are extracted as runs of ASCII letters and digits. One-character tokens and tokens longer than 40 characters are discarded. Stop words are retained because queries may require exact conjunctions containing words such as “and.” Categories use a separate tokenizer so identifiers such as `cs.GT` remain searchable as `cs.gt`.
+
+### Lexicon
+
+The lexicon maintains both a hash map from term to word ID and an array from word ID to term. Average lookup and insertion are O(1). IDs are dense and stable: adding a new term never changes an existing term's ID.
+
+### Forward index
+
+Documents are analyzed one at a time. Their forward-index entries and document records are written directly to disk, avoiding the need to retain the complete corpus in memory.
+
+### Inverted index
+
+The inverted index is constructed with a memory-bounded external sort-merge process:
+
+1. Forward-index entries are inverted in configurable document batches.
+2. Each batch is written as a run sorted by word ID.
+3. Runs are combined with a heap-based k-way merge.
+4. Posting lists remain sorted by document ID.
+
+For P postings and R sorted runs, the merge requires O(P log R) time. Memory usage depends primarily on the selected batch size rather than the total corpus size.
+
+### Random access
+
+Binary offset tables map a word ID or document ID to its byte position in the corresponding JSONL file. This allows one seek and one line read instead of scanning or loading the entire index.
+
+## Validation
+
+The test suite verifies:
+
+- token normalization, category handling, and stop-word retention;
+- lexicon ID uniqueness, density, stability, and serialization;
+- malformed, invalid, and duplicate-record handling;
+- per-field term frequencies and abstract positions;
+- AND intersection behavior;
+- document-store and posting-list random access;
+- sorted, unique postings and sorted word IDs;
+- equality of all `(document, word)` relationships in the forward and inverted indexes;
+- deterministic output across different batch sizes; and
+- forced multi-run k-way merging.
 
 ## Measured results
 
-| Corpus | Docs | Vocabulary | Postings | Build time | Peak RAM |
-|---|---|---|---|---|---|
-| `data/sample_arxiv.jsonl` (2 real + 400 synthetic) | 402 | 305 | 21,858 | 0.15 s | 20 MB |
-| `data/arxiv_subset_75k.jsonl` (real arXiv subset) | 75,000 | 228,294 | 8,266,452 | 67.62 s | Not available on Windows |
-| Stress test: synthetic Zipf corpus, 120k-word vocabulary, ~150 words/doc | 75,000 | 120,006 | 9,752,854 | 58 s | 122 MB |
+The following results were obtained from the included sample and the real 75,000-document subset:
 
-The stress test used generated text, not real arXiv data (the real file was not reachable from where this was built), so
-**rerun the build on your real 75k subset and put its numbers in your documentation.**
+| Corpus | Documents | Vocabulary | Forward/inverted pairs | Total build time |
+|---|---:|---:|---:|---:|
+| Bundled sample | 402 | 305 | 21,858 | ~0.3 s |
+| Real arXiv subset | 75,000 | 228,294 | 8,266,452 | 67.62 s |
 
-## Test data
+For the full build, all 75,000 records were accepted: zero malformed, invalid, or duplicate records were reported. The forward and inverted pair counts were identical, providing an additional consistency check.
 
-`data/sample_arxiv.jsonl` = the two real records from the Kaggle file + 400 synthetic records (ids start with `synthetic-`,
-made by `tools/make_sample_data.py`). For a real-data test file, use the first lines of the Kaggle dump:
-`head -n 1000 arxiv-metadata-oversnapshot.json > data/real_arxiv_1000.jsonl`.
+Generated indexes and the large source datasets are intentionally ignored by Git. They can be reproduced using the commands above.
 
-## Layout
+## Preparation for later stages
 
-```
-indexer/      tokenizer, corpus, lexicon, forward_index, inverted_index, build_index (CLI), lookup (CLI), config
-tools/        make_subset.py, make_sample_data.py
-tests/        test_indexing.py  (22 tests, incl. forward == inverted consistency and k-way merge)
-data/         sample_arxiv.jsonl
-```
+The Stage 2 representation is designed to support the remaining search-engine stages:
 
-## Next stages
-
-* **Barrels (Stage 3)**: split `inverted_index.jsonl` by word-id range (balanced by posting count) and load only the barrels of the query words.
-* **Search / ranking / autocomplete / semantic search**: use `Lexicon` (trie for autocomplete), `InvertedIndexReader`, `DocStoreReader`.
-* Query categories as `cs.gt` need the dot kept – use `tokenize_categories` for such terms.
+- posting lists can be divided into barrels by word-ID range;
+- field frequencies and first positions are already available for ranking;
+- document dates are stored in ordinal form for recency scoring;
+- `Lexicon`, `InvertedIndexReader`, and `DocStoreReader` provide reusable lookup interfaces; and
+- category tokens retain the notation required for category-aware queries.

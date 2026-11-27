@@ -1,5 +1,7 @@
 index_data/
+index_data_sample/
 data/arxiv_subset_75k.jsonl
+arxiv-metadata-oai-snapshot.json
 arxiv-metadata-oversnapshot.json
 __pycache__/
 *.pyc
